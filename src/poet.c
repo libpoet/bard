@@ -18,20 +18,6 @@
 ##################################################
 */
 
-typedef struct {
-  int * hb_number;
-  real_t * hb_rate;
-  real_t * x_hat_minus;
-  real_t * x_hat;
-  real_t * p_minus;
-  real_t * h;
-  real_t * k;
-  real_t * p;
-  real_t * u;
-  real_t * e;
-  real_t * workload;
-} log_buffer;
-
 // Represents state of kalman filter used in estimate_workload
 typedef struct {
   real_t x_hat_minus;
@@ -42,27 +28,56 @@ typedef struct {
   real_t p;
 } filter_state;
 
-// Container for old speedup values and old errors
+// Container for old speedup/powerup values and old errors
 typedef struct {
   real_t u;
   real_t uo;
   real_t uoo;
   real_t e;
   real_t eo;
+  real_t umin;
   real_t umax;
 } calc_xup_state;
+
+// Container for log records
+typedef struct {
+  int hb_number;
+  poet_tradeoff_type_t constraint;
+  real_t act_rate;
+  real_t act_power;
+  filter_state pfs;
+  calc_xup_state scs;
+  filter_state cfs;
+  calc_xup_state pcs;
+  real_t time_workload;
+  real_t energy_workload;
+  int lower_id;
+  int upper_id;
+  int num_hbs;
+  unsigned long long idle_ns;
+} poet_record;
+
 
 struct poet_internal_state {
   // log file and log buffer
   FILE * log_file;
   int buffer_depth;
-  log_buffer * lb;
+  poet_record * lb;
+
+  // constraint type
+  poet_tradeoff_type_t constraint;
 
   // performance filter state
   filter_state * pfs;
 
+  // cost filter state
+  filter_state * cfs;
+
   // speedup calculation state
   calc_xup_state * scs;
+
+  // powerup calculation state
+  calc_xup_state * pcs;
 
   // general
   heartbeat_t * heart;
@@ -72,11 +87,17 @@ struct poet_internal_state {
   int upper_id;
   unsigned int last_id;
   int num_hbs;
+  unsigned long long idle_ns;
+  real_t cost_estimate;
+  real_t cost_xup_estimate;
 
   unsigned int num_system_states;
   poet_apply_func apply;
   poet_control_state_t * control_states;
   void * apply_states;
+  // track if we've ever applied a state
+  // (assumption of initial state could be incorrect)
+  unsigned int is_first_apply;
 };
 
 /*
@@ -87,6 +108,7 @@ struct poet_internal_state {
 
 // Allocates and initializes a new poet state variable
 poet_state * poet_init(heartbeat_t * heart,
+                       poet_tradeoff_type_t constraint,
                        unsigned int num_system_states,
                        poet_control_state_t * control_states,
                        void * apply_states,
@@ -113,35 +135,38 @@ poet_state * poet_init(heartbeat_t * heart,
   // Allocate memory for state struct
   poet_state * state = (poet_state *) malloc(sizeof(struct poet_internal_state));
 
+  // Remember constraint type
+  state->constraint = constraint;
+
   // Store log file
   state->log_file = log_file;
   if (state->log_file != NULL) {
     fprintf(state->log_file,
-            "%16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s %16s\n",
-            "HB_NUM", "HB_RATE", "X_HAT_MINUS", "X_HAT", "P_MINUS", "H", "K",
-            "P", "SPEEDUP", "ERROR", "WORKLOAD", "LOWER_ID", "UPPER_ID", "NUM_HBS");
+            "%16s %16s "
+            "%16s %16s %16s %16s %16s %16s %16s %16s %16s "
+            "%16s %16s %16s %16s %16s %16s %16s %16s %16s "
+            "%16s %16s %16s %16s %16s %16s\n",
+            "HB_NUM", "CONSTRAINT",
+            "ACTUAL_RATE", "P_X_HAT_MINUS", "P_X_HAT", "P_P_MINUS", "P_H", "P_K", "P_P", "P_SPEEDUP", "P_ERROR",
+            "ACTUAL_POWER", "C_X_HAT_MINUS", "C_X_HAT", "C_P_MINUS", "C_H", "C_K", "C_P", "C_POWERUP", "C_ERROR",
+            "TIME_WORKLOAD", "ENERGY_WORKLOAD", "LOWER_ID", "UPPER_ID", "NUM_HBS", "IDLE_NS");
   }
 
   // Allocate memory for log buffer
   state->buffer_depth = buffer_depth;
-  state->lb = malloc(sizeof(log_buffer));
-  state->lb->hb_number = (int *) malloc(buffer_depth * sizeof(int));
-  state->lb->hb_rate = (real_t *) malloc(buffer_depth * sizeof(real_t));
-  state->lb->x_hat_minus = (real_t *) malloc(buffer_depth * sizeof(real_t));
-  state->lb->x_hat = (real_t *) malloc(buffer_depth * sizeof(real_t));
-  state->lb->p_minus = (real_t *) malloc(buffer_depth * sizeof(real_t));
-  state->lb->h = (real_t *) malloc(buffer_depth * sizeof(real_t));
-  state->lb->k = (real_t *) malloc(buffer_depth * sizeof(real_t));
-  state->lb->p = (real_t *) malloc(buffer_depth * sizeof(real_t));
-  state->lb->u = (real_t *) malloc(buffer_depth * sizeof(real_t));
-  state->lb->e = (real_t *) malloc(buffer_depth * sizeof(real_t));
-  state->lb->workload = (real_t *) malloc(buffer_depth * sizeof(real_t));
+  state->lb = (poet_record *) malloc(buffer_depth * sizeof(poet_record));
 
   // Allocate memory for performance filter state
   filter_state * pfs = (filter_state *) malloc(sizeof(filter_state));
 
+  // Allocate memory for cost filter state
+  filter_state * cfs = (filter_state *) malloc(sizeof(filter_state));
+
   // Allocate memory for speedup calculation state
   calc_xup_state * scs = (calc_xup_state *) malloc(sizeof(calc_xup_state));
+
+  // Allocate memory for powerup calculation state
+  calc_xup_state * pcs = (calc_xup_state *) malloc(sizeof(calc_xup_state));
 
   // initialize variables used in the performance filter
   pfs->x_hat_minus = X_HAT_MINUS_START;
@@ -152,6 +177,15 @@ poet_state * poet_init(heartbeat_t * heart,
   pfs->p = P_START;
   state->pfs = pfs;
 
+  // initialize variables used in the cost filter
+  cfs->x_hat_minus = X_HAT_MINUS_START;
+  cfs->x_hat = X_HAT_START;
+  cfs->p_minus = P_MINUS_START;
+  cfs->h = H_START;
+  cfs->k = K_START;
+  cfs->p = P_START;
+  state->cfs = cfs;
+
   // initialize general poet variables
   state->heart = heart;
   state->current_action = CURRENT_ACTION_START;
@@ -159,6 +193,7 @@ poet_state * poet_init(heartbeat_t * heart,
   state->apply = apply;
   state->control_states = control_states;
   state->apply_states = apply_states; // allowed to be NULL
+  state->is_first_apply = 1;
 
   state->upper_id = -1;
   state->lower_id = -1;
@@ -177,13 +212,38 @@ poet_state * poet_init(heartbeat_t * heart,
   scs->eo = EO_START;
   state->scs = scs;
 
-  state->num_hbs = 0;
+  // initialize variables used for calculating powerup
+  pcs->u = state->control_states[state->last_id].cost;
+  pcs->uo = pcs->u;
+  pcs->uoo = pcs->u;
+  pcs->e = E_START;
+  pcs->eo = EO_START;
+  state->pcs = pcs;
 
-  // Calculate max_speedup
+  state->num_hbs = 0;
+  state->idle_ns = 0;
+  state->cost_estimate = R_ZERO;
+  state->cost_xup_estimate = R_ZERO;
+
+  // Calculate min and max speedup and powerup
+  scs->umin = R_ONE;
   scs->umax = R_ONE;
+  pcs->umin = R_ONE;
+  pcs->umax = R_ONE;
   for (i = 0; i < state->num_system_states; i++) {
-    if (state->control_states[i].speedup >= scs->umax) {
-      scs->umax = state->control_states[i].speedup;
+    real_t speedup = state->control_states[i].speedup;
+    real_t cost = state->control_states[i].cost;
+    if (speedup < scs->umin) {
+      scs->umin = speedup < U_MIN_SPEEDUP ? U_MIN_SPEEDUP : speedup;
+    }
+    if (speedup >= scs->umax) {
+      scs->umax = speedup;
+    }
+    if (cost <= pcs->umin) {
+      pcs->umin = cost < U_MIN_COST ? U_MIN_COST : cost;
+    }
+    if (cost >= pcs->umax) {
+      pcs->umax = cost;
     }
   }
 
@@ -193,53 +253,93 @@ poet_state * poet_init(heartbeat_t * heart,
 // Destroys poet state variable
 void poet_destroy(poet_state * state) {
   free(state->pfs);
+  free(state->cfs);
   free(state->scs);
+  free(state->pcs);
+  free(state->lb);
   if (state->log_file != NULL) {
     fclose(state->log_file);
   }
   free(state);
 }
 
-static inline void logger(poet_state * state, int period, real_t workload) {
-  heartbeat_record_t hbr;
-  hb_get_current(state->heart, &hbr);
+// Change the constraint type at runtime
+void poet_set_constraint_type(poet_state * state,
+                              poet_tradeoff_type_t constraint) {
+  if (state != NULL) {
+    state->constraint = constraint;
+  }
+}
 
-  int hbr_tag = hbr_get_tag(&hbr);
-  int index = ((hbr_tag / period) % state->buffer_depth);
-  filter_state * fs = state->pfs;
-  calc_xup_state * cxs = state->scs;
-
+static inline void logger(poet_state * state, int tag, int period,
+                          real_t act_rate, real_t act_power,
+                          real_t time_workload, real_t energy_workload) {
   if (state->log_file != NULL) {
-    state->lb->hb_number[index] = hbr_tag;
-    state->lb->hb_rate[index] = hbr_get_window_rate(&hbr);
-    state->lb->x_hat_minus[index] = fs->x_hat_minus;
-    state->lb->x_hat[index] = fs->x_hat;
-    state->lb->p_minus[index] = fs->p_minus;
-    state->lb->h[index] = fs->h;
-    state->lb->k[index] = fs->k;
-    state->lb->p[index] = fs->p;
-    state->lb->u[index] = cxs->u;
-    state->lb->e[index] = cxs->e;
-    state->lb->workload[index] = workload;
+    int index = ((tag / period) % state->buffer_depth);
+    // copy to log buffer
+    state->lb[index].hb_number = tag;
+    state->lb[index].constraint = state->constraint;
+    state->lb[index].act_rate = act_rate;
+    state->lb[index].act_power = act_power;
+    // performance data
+    memcpy(&state->lb[index].pfs, state->pfs, sizeof(filter_state));
+    memcpy(&state->lb[index].scs, state->scs, sizeof(calc_xup_state));
+    // power data
+    memcpy(&state->lb[index].cfs, state->cfs, sizeof(filter_state));
+    memcpy(&state->lb[index].pcs, state->pcs, sizeof(calc_xup_state));
+    // other data
+    state->lb[index].time_workload = time_workload;
+    state->lb[index].energy_workload = energy_workload;
+    state->lb[index].lower_id = state->lower_id;
+    state->lb[index].upper_id = state->upper_id;
+    state->lb[index].num_hbs = state->num_hbs;
+    state->lb[index].idle_ns = state->idle_ns;
 
     if (index == state->buffer_depth - 1) {
       int i;
       for (i = 0; i < state->buffer_depth; i++) {
-        fprintf(state->log_file, "%16d %16f %16f %16f %16f %16f %16f %16f %16f %16f %16f %16d %16d %16d\n",
-                state->lb->hb_number[i],
-                real_to_db(state->lb->hb_rate[i]),
-                real_to_db(state->lb->x_hat_minus[i]),
-                real_to_db(state->lb->x_hat[i]),
-                real_to_db(state->lb->p_minus[i]),
-                real_to_db(state->lb->h[i]),
-                real_to_db(state->lb->k[i]),
-                real_to_db(state->lb->p[i]),
-                real_to_db(state->lb->u[i]),
-                real_to_db(state->lb->e[i]),
-                real_to_db(state->lb->workload[i]),
-                state->lower_id,
-                state->upper_id,
-                state->num_hbs);
+        char* constraint;
+        switch (state->constraint) {
+          case POWER:
+            constraint = "POWER";
+            break;
+          case PERFORMANCE:
+          default:
+            constraint = "PERFORMANCE";
+        }
+        fprintf(state->log_file, "%16d %16s "
+                "%16f %16f %16f %16f %16f %16f %16f %16f %16f "
+                "%16f %16f %16f %16f %16f %16f %16f %16f %16f "
+                "%16f %16f %16d %16d %16d %16llu\n",
+                state->lb[i].hb_number,
+                constraint,
+                // performance data
+                real_to_db(state->lb[i].act_rate),
+                real_to_db(state->lb[i].pfs.x_hat_minus),
+                real_to_db(state->lb[i].pfs.x_hat),
+                real_to_db(state->lb[i].pfs.p_minus),
+                real_to_db(state->lb[i].pfs.h),
+                real_to_db(state->lb[i].pfs.k),
+                real_to_db(state->lb[i].pfs.p),
+                real_to_db(state->lb[i].scs.u),
+                real_to_db(state->lb[i].scs.e),
+                // power data
+                real_to_db(state->lb[i].act_power),
+                real_to_db(state->lb[i].cfs.x_hat_minus),
+                real_to_db(state->lb[i].cfs.x_hat),
+                real_to_db(state->lb[i].cfs.p_minus),
+                real_to_db(state->lb[i].cfs.h),
+                real_to_db(state->lb[i].cfs.k),
+                real_to_db(state->lb[i].cfs.p),
+                real_to_db(state->lb[i].pcs.u),
+                real_to_db(state->lb[i].pcs.e),
+                // other data
+                real_to_db(state->lb[i].time_workload),
+                real_to_db(state->lb[i].energy_workload),
+                state->lb[i].lower_id,
+                state->lb[i].upper_id,
+                state->lb[i].num_hbs,
+                state->lb[i].idle_ns);
       }
     }
   }
@@ -275,7 +375,8 @@ static inline real_t estimate_base_workload(real_t current_workload,
 }
 
 /*
- * Calculates the speedup necessary to achieve the target performance
+ * Calculates the speedup or powerup necessary to achieve the target
+ * performance or power rate.
  */
 static inline void calculate_xup(real_t current_rate,
                                  real_t desired_rate,
@@ -294,12 +395,12 @@ static inline void calculate_xup(real_t current_rate,
 
   state->e = desired_rate - current_rate;
 
-  // Calculate speedup
+  // Calculate speedup or powerup
   state->u = mult(F , mult(A, state->uo) + mult(B, state->uoo) + mult(C, state->e) + mult(D, state->eo));
 
-  // Speedups less than one have no effect
-  if (state->u < R_ONE) {
-    state->u = R_ONE;
+  // Speedups/powerups less than the minimum have no effect
+  if (state->u < state->umin) {
+    state->u = state->umin;
   }
 
   // A speedup greater than the maximum is not achievable
@@ -314,47 +415,146 @@ static inline void calculate_xup(real_t current_rate,
 }
 
 /*
+ * Configure the cost calc_xup_state.
+ */
+static inline void calculate_cost_xup(poet_state* state) {
+  calc_xup_state* xup_state;
+  switch (state->constraint) {
+    case POWER:
+      xup_state = state->scs;
+      break;
+    case PERFORMANCE:
+    default:
+      xup_state = state->pcs;
+  }
+  // cost xup values were previously computed
+  xup_state->uoo = xup_state->uo;
+  xup_state->u = state->cost_xup_estimate;
+  xup_state->uo = xup_state->u;
+  // reset error values
+  xup_state->e = E_START;
+  xup_state->eo = EO_START;
+}
+
+/*
  * Calculate the time division between the two system configuration states
  */
 static inline void calculate_time_division(poet_state * state,
-                                           real_t r_period) {
-  // Ensure that translate returned valid configuration state ids
-  if (!(state->upper_id == -1 && state->lower_id == -1)) {
-    if (state->upper_id == -1) {
-      state->upper_id = state->lower_id;
-    } else if (state->lower_id == -1) {
-      state->lower_id = state->upper_id;
-    }
+                                           int period,
+                                           real_t workload) {
+  real_t cost;
+  real_t cost_xup;
+  real_t num_hbs;
+  real_t idle_ns;
 
-    // Calculate the time division between the upper and lower state
-    real_t lower_xup;
-    real_t upper_xup;
-    real_t target_xup;
-    upper_xup = state->control_states[state->upper_id].speedup;
-    lower_xup = state->control_states[state->lower_id].speedup;
-    target_xup = state->scs->u;
+  real_t lower_xup, partner_xup, upper_xup, target_xup;
+  real_t lower_xup_cost, partner_xup_cost, upper_xup_cost;
+  unsigned int partner_id = state->control_states[state->lower_id].idle_partner_id;
+  switch (state->constraint) {
+    case POWER:
+      lower_xup = state->control_states[state->lower_id].cost;
+      partner_xup = state->control_states[partner_id].cost;
+      upper_xup = state->control_states[state->upper_id].cost;
+      lower_xup_cost = state->control_states[state->lower_id].speedup;
+      partner_xup_cost = state->control_states[partner_id].speedup;
+      upper_xup_cost = state->control_states[state->upper_id].speedup;
+      target_xup = state->pcs->u;
+      break;
+    case PERFORMANCE:
+    default:
+      lower_xup = state->control_states[state->lower_id].speedup;
+      partner_xup = state->control_states[partner_id].speedup;
+      upper_xup = state->control_states[state->upper_id].speedup;
+      lower_xup_cost = state->control_states[state->lower_id].cost;
+      partner_xup_cost = state->control_states[partner_id].cost;
+      upper_xup_cost = state->control_states[state->upper_id].cost;
+      target_xup = state->scs->u;
+  }
 
-    // x represents the percentage of heartbeats spent in the first (lower)
-    // configuration
-    // Conversely, (1 - x) is the percentage of heartbeats in the second
-    // (upper) configuration
-    real_t x;
+  real_t r_period = int_to_real(period);
+  if (lower_xup < R_ONE) {
+    // this is an idle state
 
-    // If lower rate and upper rate are equal, no need for time division
-    if (upper_xup == lower_xup) {
-      x = R_ZERO;
-      state->num_hbs = 0;
+    // first determine required hybrid rate (combo of lower and partner rate)
+    // period / target rate = 1 / (hybrid rate) + (period - 1) / (upper rate)
+    // solve for hybrid rate
+    real_t hybrid_xup = div(mult(target_xup, upper_xup),
+                            mult(r_period, upper_xup - target_xup) + target_xup);
+
+    if (hybrid_xup >= partner_xup) {
+      // one heartbeat is already too long to be here, even without idling
+      num_hbs = 0;
+      idle_ns = 0;
+      cost = mult(div(r_period, upper_xup), upper_xup_cost);
+      cost_xup = upper_xup_cost;
     } else {
+      // compute percentage of first heartbeat to spend idling
+      real_t x;
+      real_t hybrid_xup_cost;
+      if (lower_xup <= R_ZERO) {
+        // hybrid rate = (1 - x) * (partner rate)
+        x = R_ONE - div(hybrid_xup, partner_xup);
+        hybrid_xup_cost = mult(x, lower_xup_cost) +
+                          mult(R_ONE - x, partner_xup_cost);
+      } else {
+        // 1 / (hybrid rate) = x / (lower rate) + (1 - x) / (partner rate)
+        x = div(mult(lower_xup, hybrid_xup - partner_xup),
+                mult(hybrid_xup, lower_xup - partner_xup));
+        hybrid_xup_cost = mult(div(x, lower_xup), lower_xup_cost) +
+                          mult(div(R_ONE - x, partner_xup), partner_xup_cost);
+      }
+
+      real_t idle_sec = mult(workload,
+                             div(R_ONE, hybrid_xup) - // time in first heartbeat
+                             div(x, partner_xup));    // time in partner id
+      idle_ns = real_to_int(mult(idle_sec, CONST(1000000000.0)));
+      num_hbs = 1;
+      cost = mult(div(R_ONE, hybrid_xup), hybrid_xup_cost) +
+             mult(div(r_period - R_ONE, upper_xup), upper_xup_cost);
+      cost_xup = div(hybrid_xup_cost + mult(r_period - R_ONE, upper_xup_cost), r_period);
+    }
+  } else {
+    // Calculate the time division between the upper and lower state
+    // If lower rate and upper rate are equal, no need for time division
+    real_t r_hbs;
+    if (upper_xup == lower_xup) {
+      r_hbs = R_ZERO;
+    } else {
+      // x represents the percentage of heartbeats spent in the first (lower)
+      // configuration
+      // Conversely, (1 - x) is the percentage of heartbeats in the second
+      // (upper) configuration
       // This equation ensures the time period of the combined rates is equal
       // to the time period of the target rate
       // 1 / Target rate = X / (lower rate) + (1 - X) / (upper rate)
       // Solve for X
-      x = div(mult(upper_xup, lower_xup) - mult(target_xup, lower_xup),
-              mult(upper_xup, target_xup) - mult(target_xup, lower_xup));
+      real_t x = div(mult(upper_xup, lower_xup) - mult(target_xup, lower_xup),
+                     mult(upper_xup, target_xup) - mult(target_xup, lower_xup));
 
       // Num of hbs (in lower state) = x * (controller period)
-      state->num_hbs = real_to_int(mult(r_period, x));
+      r_hbs = mult(r_period, x);
     }
+    num_hbs = real_to_int(r_hbs);
+    idle_ns = 0;
+    r_hbs = int_to_real(num_hbs); // calculate actual cost
+    cost = mult(div(r_hbs, lower_xup), lower_xup_cost) +
+           mult(div(r_period - r_hbs, upper_xup), upper_xup_cost);
+    cost_xup = div(mult(r_hbs, lower_xup_cost) + mult(r_period - r_hbs, upper_xup_cost), r_period);
+  }
+
+  state->num_hbs = num_hbs;
+  state->idle_ns = idle_ns;
+  state->cost_estimate = cost;
+  state->cost_xup_estimate = cost_xup;
+}
+
+static inline real_t get_control_xup(poet_state * state, int id) {
+  switch (state->constraint) {
+    case POWER:
+      return state->control_states[id].cost;
+    case PERFORMANCE:
+    default:
+      return state->control_states[id].speedup;
   }
 }
 
@@ -362,50 +562,70 @@ static inline void calculate_time_division(poet_state * state,
  * Check all pairs of states that can achieve the target and choose the pair
  * with the lowest cost. Uses an n^2 algorithm.
  */
-static inline void translate_n2_with_time(poet_state * state, int period) {
+static inline void translate_n2_with_time(poet_state * state,
+                                          int period,
+                                          real_t workload) {
   int i;
   int j;
-  real_t r_period = int_to_real(period);
   real_t target_xup;
-  real_t best_cost = BIG_REAL_T;
+  real_t best_cost;
+  real_t best_cost_xup = -1;
   int best_lower_id = -1;
   int best_upper_id = -1;
   int best_num_hbs = -1;
+  unsigned long long best_idle_ns = 0;
   real_t lower_xup;
   real_t upper_xup;
-  real_t lower_xup_cost;
-  real_t upper_xup_cost;
-  real_t r_hbs;
-  real_t cost;
-  target_xup = state->scs->u;
+  int is_best;
+  int disable_idle = getenv(POET_DISABLE_IDLE) == NULL ? 0 : 1;
+
+  switch (state->constraint) {
+    case POWER:
+      target_xup = state->pcs->u;
+      best_cost = R_ZERO;
+      break;
+    case PERFORMANCE:
+    default:
+      target_xup = state->scs->u;
+      best_cost = BIG_REAL_T;
+  }
 
   for (i = 0; i < state->num_system_states; i++) {
-    upper_xup = state->control_states[i].speedup;
-    upper_xup_cost = state->control_states[i].cost;
-    if (upper_xup < target_xup) {
+    upper_xup = get_control_xup(state, i);
+    if (upper_xup < target_xup || upper_xup < R_ONE) {
+      // upper_id cannot be an idle state
       continue;
     }
     state->upper_id = i;
     for (j = 0; j < state->num_system_states; j++) {
-      lower_xup = state->control_states[j].speedup;
-      lower_xup_cost = state->control_states[j].cost;
-      if (lower_xup > target_xup) {
+      lower_xup = get_control_xup(state, j);
+      if (lower_xup > target_xup ||
+          (lower_xup < R_ONE && disable_idle > 0)) {
         continue;
       }
       state->lower_id = j;
       // find time for both states
-      calculate_time_division(state, r_period);
-      // find cost of this state combination
-      r_hbs = int_to_real(state->num_hbs);
-      cost = mult(div(r_hbs, lower_xup), lower_xup_cost) +
-             mult(div(r_period - r_hbs, upper_xup), upper_xup_cost);
+      calculate_time_division(state, period, workload);
       // if this is the best configuration so far, remember it
-      if (cost < best_cost) {
+      switch (state->constraint) {
+        case POWER:
+          // maximize performance
+          is_best = state->cost_estimate > best_cost ? 1 : 0;
+          break;
+        case PERFORMANCE:
+        default:
+          // minimize power
+          is_best = state->cost_estimate < best_cost ? 1 : 0;
+      }
+      if (is_best > 0) {
         best_lower_id = j;
         best_upper_id = i;
         best_num_hbs = state->num_hbs;
-        best_cost = cost;
+        best_idle_ns = state->idle_ns;
+        best_cost = state->cost_estimate;
+        best_cost_xup = state->cost_xup_estimate;
       }
+      state->idle_ns = 0;
     }
   }
 
@@ -413,6 +633,9 @@ static inline void translate_n2_with_time(poet_state * state, int period) {
   state->lower_id = best_lower_id;
   state->upper_id = best_upper_id;
   state->num_hbs = best_num_hbs;
+  state->idle_ns = best_idle_ns;
+  state->cost_estimate = best_cost;
+  state->cost_xup_estimate = best_cost_xup;
 }
 
 // Runs POET decision engine and requests system changes
@@ -424,35 +647,67 @@ void poet_apply_control(poet_state * state) {
   heartbeat_record_t hbr;
   hb_get_current(state->heart, &hbr);
   int period = hb_get_window_size(state->heart);
-  real_t hbr_window_rate = hbr_get_window_rate(&hbr);
-  real_t hbr_window_power = hbr_get_window_power(&hbr);
 
-  if(state->current_action == 0 && hbr_window_power != R_ZERO) {
-    // Read current performance data
-    real_t act_speed = hbr_window_rate;
+  int current_action = state->current_action;
+  state->current_action = (state->current_action + 1) % period;
+
+  if(current_action == 0) {
+    real_t act_speed = hbr_get_window_rate(&hbr);
+    real_t act_power = hbr_get_window_power(&hbr);
 
     // Estimate the performance workload
     // estimate time between heartbeats given minimum amount of resources
     real_t time_workload = estimate_base_workload(act_speed,
                                                   state->scs->u,
                                                   state->pfs);
+    // Estimate the cost workload
+    // estimate energy between heartbeats given minimum amount of resources
+    real_t energy_workload = estimate_base_workload(act_power,
+                                                    state->pcs->u,
+                                                    state->cfs);
 
-    // Get a new goal speedup to apply to the application
-    real_t min_speed = hb_get_min_rate(state->heart);
-    real_t max_speed = hb_get_max_rate(state->heart);
-    real_t speed_goal = mult(max_speed + min_speed, CONST(0.5));
-    calculate_xup(act_speed, speed_goal, time_workload, state->scs);
-
-    // printf("\ntarget rate is %f\n", real_to_db(speed_goal));
-    // printf("current rate is %f\n", real_to_db(act_speed));
-    // printf("calculated speedup is %f\n\n", real_to_db(state->scs->u));
+    // Get a new goal speedup or powerup to apply to the application
+    real_t workload;
+    real_t goal;
+    switch (state->constraint) {
+      case POWER:
+        goal = mult(hb_get_min_power(state->heart) +
+                    hb_get_max_power(state->heart), CONST(0.5));
+        calculate_xup(act_power, goal, energy_workload, state->pcs);
+        workload = energy_workload;
+        /*printf("\ntarget power is %f\n"
+               "current power is %f\n"
+               "calculated powerup is %f\n\n",
+               real_to_db(goal),
+               real_to_db(act_power),
+               real_to_db(state->pcs->u));*/
+        break;
+      case PERFORMANCE:
+      default:
+        goal = mult(hb_get_min_rate(state->heart) +
+                    hb_get_max_rate(state->heart), CONST(0.5));
+        calculate_xup(act_speed, goal, time_workload, state->scs);
+        workload = time_workload;
+        /*printf("\ntarget rate is %f\n"
+               "current rate is %f\n"
+               "calculated speedup is %f\n\n",
+               real_to_db(goal),
+               real_to_db(act_speed),
+               real_to_db(state->scs->u));*/
+    }
 
     // Xup is translated into a system configuration
     // A certain amount of time is assigned to each system configuration
     // in order to achieve the requested Xup
-    translate_n2_with_time(state, period);
+    translate_n2_with_time(state, period, workload);
+    calculate_cost_xup(state);
 
-    logger(state, period, time_workload);
+    /*printf("POET: num_hbs = %d; idle time (ns) = %llu\n",
+           state->num_hbs, state->idle_ns);*/
+
+    logger(state, hbr_get_tag(&hbr), period,
+           act_speed, act_power,
+           time_workload, energy_workload);
   }
 
   // Check which speedup should be applied, upper or lower
@@ -464,13 +719,15 @@ void poet_apply_control(poet_state * state) {
     config_id = state->upper_id;
   }
 
-  if (config_id >= 0 && config_id != state->last_id) {
+  if (config_id >= 0 && (config_id != state->last_id || state->is_first_apply > 0)) {
     if (state->apply != NULL && getenv(POET_DISABLE_APPLY) == NULL) {
       state->apply(state->apply_states, state->num_system_states, config_id,
-                   state->last_id);
+                   state->last_id, state->idle_ns, state->is_first_apply);
+      state->is_first_apply = 0;
     }
     state->last_id = config_id;
+    // only allow idle once per period
+    state->idle_ns = 0;
   }
 
-  state->current_action = (state->current_action + 1) % period;
 }

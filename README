@@ -4,6 +4,8 @@ The Performance with Optimal Energy Toolkit (POET) provides a means to monitor
 and adjust application performance while minimizing energy consumption during
 application runtime.
 
+Bard is an extension of POET that adds support for monitoring and adjusting
+power consumption while maximizing performance.
 
 Running POET Examples
 ----------------------------------------

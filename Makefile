@@ -45,13 +45,14 @@ OBJECTS = $(patsubst $(SRCDIR)/%.c,$(BINDIR)/%.o,$(SOURCES))
 TEST_SOURCES = $(wildcard $(TESTDIR)/*.c)
 TEST_OBJECTS = $(patsubst $(TESTDIR)/%.c,$(BINDIR)/%.o,$(TEST_SOURCES))
 TESTS = $(patsubst $(TESTDIR)/%.c,$(BINDIR)/%,$(TEST_SOURCES))
+POET_IDLE = $(BINDIR)/poet_idle
 LIBNAME = libpoet.so
 LIBPOET = lib/$(LIBNAME)
 
 # phony targets
 .PHONY: all clean
 
-all: $(LIBPOET) $(TESTS)
+all: $(POET_IDLE) $(LIBPOET) $(TESTS)
 
 # Build source object files
 $(BINDIR)/%.o : $(SRCDIR)/%.c $(HEADERS) | $(BINDIR)
@@ -60,6 +61,10 @@ $(BINDIR)/%.o : $(SRCDIR)/%.c $(HEADERS) | $(BINDIR)
 # Build test object files
 $(BINDIR)/%.o : $(TESTDIR)/%.c $(HEADERS) | $(BINDIR)
 	$(CC) $(CFLAGS) -c $(TESTCFLAGS) $< -o $@
+
+# Build poet_idle
+$(POET_IDLE) : $(BINDIR)/poet_idle.o | $(BINDIR)
+	$(CC) $^ -o $@
 
 # Build POET Library
 $(LIBPOET) : $(BINDIR)/poet.o $(BINDIR)/poet_config_linux.o | $(LIBDIR)
@@ -82,10 +87,12 @@ $(LOGDIR) :
 install: all
 	install -m 0644 $(LIBPOET) /usr/local/lib/
 	mkdir -p /usr/local/include/poet
+	install -m 0755 $(POET_IDLE) /usr/local/bin/
 	install -m 0644 inc/* /usr/local/include/poet/
 	install -m 0644 src/*.h /usr/local/include/poet/
 
 uninstall:
+	rm -f /usr/local/bin/poet_idle
 	rm -f /usr/local/lib/$(LIBNAME)
 	rm -rf /usr/local/include/poet/
 

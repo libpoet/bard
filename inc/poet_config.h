@@ -7,10 +7,45 @@ extern "C" {
 
 #include "poet.h"
 
+#define DIV_ROUND_UP(N, S) (((N) + (S) - 1) / (S))
+
+// Configure the max number of cores supported
+#ifndef POET_MAX_CORES
+  #define POET_MAX_CORES 64
+#endif
+// "0x" + (num required chars) + terminating char
+#define POET_LEN_CORE_MASK (2 + DIV_ROUND_UP(POET_MAX_CORES, 4) + 1)
+// 7 is the max length of a DVFS frequency in KHz
+// (digits) + commas + terminating char; (commas = POET_MAX_CORES - 1)
+#define POET_LEN_FREQS ((POET_MAX_CORES * 7) + POET_MAX_CORES)
+
+/**
+ * This struct defines a system configuration.
+ * It specifies the configuration identifier, the active cores, and the
+ * DVFS frequencies to use.
+ */
 typedef struct {
   unsigned int id;
-  unsigned long freq;
-  unsigned int cores;
+  /*
+   * Indicates which cores on the system are active and which are inactive for
+   * a configuration.
+   * This is best represented in hex, e.g. 0x0000002B enables 4 cores: 5,3,1,0
+   */
+  char core_mask[POET_LEN_CORE_MASK];
+  /*
+   * A comma-delimited list of DVFS frequencies.
+   * There should be an entry in this list for all cores on the system, even
+   * if they are not active in core_mask. However...
+   *
+   * If core_mask uses cores in order (e.g. cores 0-2), you only need to list
+   * frequencies for those cores.  But, if cores are used out of order
+   * (e.g. cores 0,2,3) then there must be a spot in the list for each core up
+   * through least the last active core.
+   *
+   * A '-' should be used to indicate that the frequency of a core (like a
+   * disabled one) does not matter.
+   */
+  char freqs[POET_LEN_FREQS];
 } poet_cpu_state_t;
 
 /**
@@ -23,11 +58,15 @@ typedef struct {
  * @param num_states
  * @param id
  * @param last_id
+ * @param idle_ns
+ * @param is_first_apply
  */
 void apply_cpu_config(void* states,
                       unsigned int num_states,
                       unsigned int id,
-                      unsigned int last_id);
+                      unsigned int last_id,
+                      unsigned long long idle_ns,
+                      unsigned int is_first_apply);
 
 /**
  * Read the control states from the file at the provided path and store in the

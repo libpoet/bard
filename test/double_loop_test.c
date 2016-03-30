@@ -3,7 +3,6 @@
 #include <unistd.h>
 #include "poet.h"
 #include "poet_config.h"
-#include "poet_math.h"
 
 const char* HB_LOG_FILE = "/tmp/heartbeat_log.txt";
 const char* POET_LOG_FILE = "/tmp/poet_log.txt";
@@ -39,10 +38,9 @@ int main(int argc, char** argv) {
   BIG_NUM1 = atoi(argv[1]);
   unsigned int s_nstates;
   poet_control_state_t * s_control_states;
-  get_control_states("config/default/control_config",
-                     &s_control_states,
-                     &s_nstates);
+  get_control_states(NULL, &s_control_states, &s_nstates);
   poet_state * state = poet_init(heart,
+                                 PERFORMANCE,
                                  s_nstates, s_control_states, NULL,
                                  NULL,
                                  NULL,

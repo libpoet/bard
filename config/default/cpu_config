@@ -1,2 +1,2 @@
-#id	freq	cores
-0	0		0
+#id	cores	freqs
+0	0x1		0

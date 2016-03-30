@@ -1,2 +1,2 @@
-#id	Speedup		Power
-0	1			1
+#id	Speedup	Powerup	Partner_id
+0	1		1		0

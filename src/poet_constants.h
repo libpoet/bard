@@ -40,8 +40,10 @@ static const real_t Z1                 =   CONST(0.0);
 #endif
 
 static const real_t MU                 =   CONST(1.0);
-static const real_t E_START            =   CONST(1.0);
-static const real_t EO_START           =   CONST(1.0);
+static const real_t E_START            =   CONST(0.0);
+static const real_t EO_START           =   CONST(0.0);
+static const real_t U_MIN_SPEEDUP      =   CONST(0.1);
+static const real_t U_MIN_COST         =   CONST(0.1);
 
 // general constants
 static const int CURRENT_ACTION_START  =  1;

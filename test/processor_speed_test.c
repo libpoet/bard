@@ -3,19 +3,18 @@
 #include <unistd.h>
 #include "poet.h"
 #include "poet_config.h"
-#include "poet_math.h"
 
 #define CONTROL_STATES { \
-{ 0 , CONST(1.0) , CONST(1.0) } , \
-{ 1 , CONST(1.165) , CONST(1.1) } , \
-{ 2 , CONST(1.335) , CONST(1.2) } , \
-{ 3 , CONST(1.585) , CONST(1.3) }}
+{ 0 , CONST(1.0) , CONST(1.0) , 0 } , \
+{ 1 , CONST(1.165) , CONST(1.1) , 1 } , \
+{ 2 , CONST(1.335) , CONST(1.2) , 2 } , \
+{ 3 , CONST(1.585) , CONST(1.3) , 3 }}
 
 #define CPU_STATES { \
-{ 0 , CONST(1000000) , CONST(1) } , \
-{ 1 , CONST(1100000) , CONST(1) } , \
-{ 2 , CONST(1200000) , CONST(1) } , \
-{ 3 , CONST(1300000) , CONST(1) }}
+{ 0 , "0x00000001" , "1000000" } , \
+{ 1 , "0x00000001" , "1100000" } , \
+{ 2 , "0x00000001" , "1200000" } , \
+{ 3 , "0x00000001" , "1300000" }}
 
 const char* HB_LOG_FILE = "/tmp/heartbeat_log.txt";
 const char* POET_LOG_FILE = "/tmp/poet_log.txt";
@@ -29,14 +28,18 @@ poet_control_state_t control_states[] = CONTROL_STATES;
 poet_cpu_state_t cpu_states[] = CPU_STATES;
 
 void apply(void * states, unsigned int num_states, unsigned int id,
-           unsigned int last_id);
+           unsigned int last_id, unsigned long long idle_ns,
+           unsigned int is_first_apply);
 void apply2(void * states, unsigned int num_states, unsigned int id,
-            unsigned int last_id);
+            unsigned int last_id, unsigned long long idle_ns,
+            unsigned int is_first_apply);
 
 void apply(void * states,
            unsigned int num_states,
            unsigned int id,
-           unsigned int last_id) {
+           unsigned int last_id,
+           unsigned long long idle_ns,
+           unsigned int is_first_apply) {
   if (id < 0) {
     return;
   }
@@ -49,7 +52,10 @@ int freq_state = 0;
 void apply2(void * states,
             unsigned int num_states,
             unsigned int id,
-            unsigned int last_id) {
+            unsigned int last_id,
+            unsigned long long idle_ns,
+            unsigned int is_first_apply) {
+
   char command[4096];
   int i;
   if (freq_state != id) {
@@ -89,6 +95,7 @@ int main(int argc, char** argv) {
   volatile int dummy = 0;
   BIG_NUM1 = atoi(argv[1]);
   poet_state * state = poet_init(heart,
+                                 PERFORMANCE,
                                  4,
                                  control_states,
                                  cpu_states,
