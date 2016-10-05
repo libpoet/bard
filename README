@@ -7,6 +7,15 @@ application runtime.
 Bard is an extension of POET that adds support for monitoring and adjusting
 power consumption while maximizing performance.
 
+For details, please see the following and reference as appropriate:
+
+Connor Imes, David H. K. Kim, Martina Maggio, and Henry Hoffmann. "POET: A Portable Approach to Minimizing Energy Under Soft Real-time Constraints". In: RTAS. 2015.
+
+Connor Imes and Henry Hoffmann. "Bard: A Unified Framework for Managing Soft Timing and Power Constraints". In: SAMOS. 2016.
+
+Connor Imes, David H. K. Kim, Martina Maggio, and Henry Hoffmann. "Portable Multicore Resource Management for Applications with Performance Constraints". In: MCSoC. 2016.
+
+
 Running POET Examples
 ----------------------------------------
 First ensure that you have installed the Heartbeats library.
