@@ -1,7 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <heartbeats/heartbeat-accuracy-power.h>
 #include "poet.h"
 #include "poet_constants.h"
 #include "poet_math.h"
@@ -41,7 +40,7 @@ typedef struct {
 
 // Container for log records
 typedef struct {
-  int hb_number;
+  unsigned long hb_number;
   poet_tradeoff_type_t constraint;
   real_t act_rate;
   real_t act_power;
@@ -57,7 +56,6 @@ typedef struct {
   unsigned long long idle_ns;
 } poet_record;
 
-
 struct poet_internal_state {
   // log file and log buffer
   FILE * log_file;
@@ -66,6 +64,7 @@ struct poet_internal_state {
 
   // constraint type
   poet_tradeoff_type_t constraint;
+  real_t constraint_goal;
 
   // performance filter state
   filter_state * pfs;
@@ -80,13 +79,13 @@ struct poet_internal_state {
   calc_xup_state * pcs;
 
   // general
-  heartbeat_t * heart;
   int current_action;
 
   int lower_id;
   int upper_id;
   unsigned int last_id;
   int num_hbs;
+  unsigned int period;
   unsigned long long idle_ns;
   real_t cost_estimate;
   real_t cost_xup_estimate;
@@ -107,16 +106,17 @@ struct poet_internal_state {
 */
 
 // Allocates and initializes a new poet state variable
-poet_state * poet_init(heartbeat_t * heart,
+poet_state * poet_init(real_t goal,
                        poet_tradeoff_type_t constraint,
                        unsigned int num_system_states,
                        poet_control_state_t * control_states,
                        void * apply_states,
                        poet_apply_func apply,
                        poet_curr_state_func current,
+                       unsigned int period,
                        unsigned int buffer_depth,
                        const char * log_filename) {
-  int i;
+  unsigned int i;
   FILE* log_file = NULL;
 
   if (control_states == NULL) {
@@ -137,6 +137,12 @@ poet_state * poet_init(heartbeat_t * heart,
 
   // Remember constraint type
   state->constraint = constraint;
+
+  // Remember the constraint goal
+  state->constraint_goal = goal;
+
+  // Remember the period
+  state->period = period;
 
   // Store log file
   state->log_file = log_file;
@@ -187,7 +193,6 @@ poet_state * poet_init(heartbeat_t * heart,
   state->cfs = cfs;
 
   // initialize general poet variables
-  state->heart = heart;
   state->current_action = CURRENT_ACTION_START;
   state->num_system_states = num_system_states;
   state->apply = apply;
@@ -265,19 +270,22 @@ void poet_destroy(poet_state * state) {
 
 // Change the constraint type at runtime
 void poet_set_constraint_type(poet_state * state,
-                              poet_tradeoff_type_t constraint) {
+                              poet_tradeoff_type_t constraint,
+                              real_t goal) {
   if (state != NULL) {
     state->constraint = constraint;
+    state->constraint_goal = goal;
   }
 }
 
-static inline void logger(poet_state * state, int tag, int period,
+static inline void logger(poet_state * state, unsigned long id,
                           real_t act_rate, real_t act_power,
                           real_t time_workload, real_t energy_workload) {
+  int index = ((id / state->period) % state->buffer_depth);
+
   if (state->log_file != NULL) {
-    int index = ((tag / period) % state->buffer_depth);
     // copy to log buffer
-    state->lb[index].hb_number = tag;
+    state->lb[index].hb_number = id;
     state->lb[index].constraint = state->constraint;
     state->lb[index].act_rate = act_rate;
     state->lb[index].act_power = act_power;
@@ -307,7 +315,7 @@ static inline void logger(poet_state * state, int tag, int period,
           default:
             constraint = "PERFORMANCE";
         }
-        fprintf(state->log_file, "%16d %16s "
+        fprintf(state->log_file, "%16lu %16s "
                 "%16f %16f %16f %16f %16f %16f %16f %16f %16f "
                 "%16f %16f %16f %16f %16f %16f %16f %16f %16f "
                 "%16f %16f %16d %16d %16d %16llu\n",
@@ -440,7 +448,6 @@ static inline void calculate_cost_xup(poet_state* state) {
  * Calculate the time division between the two system configuration states
  */
 static inline void calculate_time_division(poet_state * state,
-                                           int period,
                                            real_t workload) {
   real_t cost;
   real_t cost_xup;
@@ -471,7 +478,7 @@ static inline void calculate_time_division(poet_state * state,
       target_xup = state->scs->u;
   }
 
-  real_t r_period = int_to_real(period);
+  real_t r_period = int_to_real(state->period);
   if (lower_xup < R_ONE) {
     // this is an idle state
 
@@ -563,10 +570,9 @@ static inline real_t get_control_xup(poet_state * state, int id) {
  * with the lowest cost. Uses an n^2 algorithm.
  */
 static inline void translate_n2_with_time(poet_state * state,
-                                          int period,
                                           real_t workload) {
-  int i;
-  int j;
+  unsigned int i;
+  unsigned int j;
   real_t target_xup;
   real_t best_cost;
   real_t best_cost_xup = -1;
@@ -605,7 +611,7 @@ static inline void translate_n2_with_time(poet_state * state,
       }
       state->lower_id = j;
       // find time for both states
-      calculate_time_division(state, period, workload);
+      calculate_time_division(state, workload);
       // if this is the best configuration so far, remember it
       switch (state->constraint) {
         case POWER:
@@ -639,54 +645,42 @@ static inline void translate_n2_with_time(poet_state * state,
 }
 
 // Runs POET decision engine and requests system changes
-void poet_apply_control(poet_state * state) {
+void poet_apply_control(poet_state * state,
+                        unsigned long id,
+                        real_t perf,
+                        real_t pwr) {
   if (getenv(POET_DISABLE_CONTROL) != NULL) {
     return;
   }
 
-  heartbeat_record_t hbr;
-  hb_get_current(state->heart, &hbr);
-  int period = hb_get_window_size(state->heart);
-
-  int current_action = state->current_action;
-  state->current_action = (state->current_action + 1) % period;
-
-  if(current_action == 0) {
-    real_t act_speed = hbr_get_window_rate(&hbr);
-    real_t act_power = hbr_get_window_power(&hbr);
-
+  if (state->current_action == 0) {
     // Estimate the performance workload
     // estimate time between heartbeats given minimum amount of resources
-    real_t time_workload = estimate_base_workload(act_speed,
+    real_t time_workload = estimate_base_workload(perf,
                                                   state->scs->u,
                                                   state->pfs);
     // Estimate the cost workload
     // estimate energy between heartbeats given minimum amount of resources
-    real_t energy_workload = estimate_base_workload(act_power,
+    real_t energy_workload = estimate_base_workload(pwr,
                                                     state->pcs->u,
                                                     state->cfs);
 
     // Get a new goal speedup or powerup to apply to the application
     real_t workload;
-    real_t goal;
     switch (state->constraint) {
       case POWER:
-        goal = mult(hb_get_min_power(state->heart) +
-                    hb_get_max_power(state->heart), CONST(0.5));
-        calculate_xup(act_power, goal, energy_workload, state->pcs);
+        calculate_xup(pwr, state->constraint_goal, energy_workload, state->pcs);
         workload = energy_workload;
         /*printf("\ntarget power is %f\n"
                "current power is %f\n"
                "calculated powerup is %f\n\n",
                real_to_db(goal),
-               real_to_db(act_power),
+               real_to_db(pwr),
                real_to_db(state->pcs->u));*/
         break;
       case PERFORMANCE:
       default:
-        goal = mult(hb_get_min_rate(state->heart) +
-                    hb_get_max_rate(state->heart), CONST(0.5));
-        calculate_xup(act_speed, goal, time_workload, state->scs);
+        calculate_xup(perf, state->constraint_goal, time_workload, state->scs);
         workload = time_workload;
         /*printf("\ntarget rate is %f\n"
                "current rate is %f\n"
@@ -699,14 +693,14 @@ void poet_apply_control(poet_state * state) {
     // Xup is translated into a system configuration
     // A certain amount of time is assigned to each system configuration
     // in order to achieve the requested Xup
-    translate_n2_with_time(state, period, workload);
+    translate_n2_with_time(state, workload);
     calculate_cost_xup(state);
 
     /*printf("POET: num_hbs = %d; idle time (ns) = %llu\n",
            state->num_hbs, state->idle_ns);*/
 
-    logger(state, hbr_get_tag(&hbr), period,
-           act_speed, act_power,
+    logger(state, id,
+           perf, pwr,
            time_workload, energy_workload);
   }
 
@@ -719,7 +713,7 @@ void poet_apply_control(poet_state * state) {
     config_id = state->upper_id;
   }
 
-  if (config_id >= 0 && (config_id != state->last_id || state->is_first_apply > 0)) {
+  if (config_id >= 0 && ((unsigned int) config_id != state->last_id || state->is_first_apply > 0)) {
     if (state->apply != NULL && getenv(POET_DISABLE_APPLY) == NULL) {
       state->apply(state->apply_states, state->num_system_states, config_id,
                    state->last_id, state->idle_ns, state->is_first_apply);
@@ -730,4 +724,5 @@ void poet_apply_control(poet_state * state) {
     state->idle_ns = 0;
   }
 
+  state->current_action = (state->current_action + 1) % state->period;
 }

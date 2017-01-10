@@ -1,7 +1,7 @@
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <pthread.h>
 #include "poet_config.h"
 #include "poet.h"
 
@@ -21,7 +21,7 @@ void test_idle() {
   // test idle states
   unsigned int nthreads = 32;
   pthread_t threads[nthreads];
-  int i;
+  unsigned int i;
   for (i = 0; i < nthreads; i++) {
     if (pthread_create(&threads[i], NULL, thread_worker, NULL)) {
       fprintf(stderr, "Thread creation failed\n");
@@ -49,7 +49,12 @@ int main() {
   }
   printf("get_control_state size: %u\n", nctl_states);
   for (i = 0; i < nctl_states; i++) {
-    printf("%u %f %f %u\n", cstates_speed[i].id, cstates_speed[i].speedup,
+#ifdef FIXED_POINT
+    printf("%u, %d, %d, %u\n",
+#else
+    printf("%u, %f, %f, %u\n",
+#endif
+           cstates_speed[i].id, cstates_speed[i].speedup,
            cstates_speed[i].cost, cstates_speed[i].idle_partner_id);
   }
 

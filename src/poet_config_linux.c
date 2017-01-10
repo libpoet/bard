@@ -65,8 +65,8 @@ static inline int cpu_governor_cmp(unsigned int cpu, char* governor) {
   int governor_cmp = -1;
   size_t len;
 
-  sprintf(buffer,
-          "/sys/devices/system/cpu/cpu%u/cpufreq/scaling_governor", cpu);
+  snprintf(buffer, sizeof(buffer),
+           "/sys/devices/system/cpu/cpu%u/cpufreq/scaling_governor", cpu);
   fp = fopen(buffer, "r");
   if (fp == NULL) {
     fprintf(stderr, "cpu_governor_cmp: Failed to open %s\n", buffer);
@@ -94,8 +94,8 @@ static inline unsigned long get_curr_cpu_frequency(unsigned long cpu) {
   char buffer[128];
   unsigned long curr_freq = 0;
 
-  sprintf(buffer,
-          "/sys/devices/system/cpu/cpu%lu/cpufreq/scaling_cur_freq", cpu);
+  snprintf(buffer, sizeof(buffer),
+           "/sys/devices/system/cpu/cpu%lu/cpufreq/scaling_cur_freq", cpu);
   fp = fopen(buffer, "r");
   if (fp == NULL) {
     fprintf(stderr, "get_curr_cpu_frequency: Failed to open %s\n", buffer);
@@ -289,7 +289,7 @@ void apply_cpu_config_taskset(poet_cpu_state_t* cpu_states,
   // only run taskset if the core assignment has changed
   if (is_first_apply || strcmp(cpu_states[id].core_mask, cpu_states[last_id].core_mask)) {
     // apply taskset to this PID and all subordinate PIDs
-    sprintf(command,
+    snprintf(command, sizeof(command),
             "ps -eLf | awk '(/%d/) && (!/awk/) {print $4}' | xargs -n1 taskset -p %s > /dev/null",
             getpid(), cpu_states[id].core_mask);
     printf("apply_cpu_config_taskset: Applying core allocation: %s\n", command);
@@ -305,7 +305,7 @@ void apply_cpu_config_taskset(poet_cpu_state_t* cpu_states,
   char* freq = strtok(freqs, ",");
   while (freq != NULL) {
     if (freq[0] != '-') {
-      sprintf(command,
+      snprintf(command, sizeof(command),
               "echo %lu > /sys/devices/system/cpu/cpu%u/cpufreq/"
               POET_CONFIG_DVFS_FILE,
               strtoul(freq, NULL, 0), i);
@@ -362,11 +362,11 @@ static inline unsigned int get_num_states(FILE* rfile) {
 }
 
 /* Example file:
-  #id	  speedup		  powerup       partner_id
+  #id   speedup     powerup       partner_id
   0     0           0.25          1
-  1	    1		        1             0
-  2	    1.206124137	1.084785357   0
-  3	    1.387207669	1.196666697   0
+  1     1           1             0
+  2     1.206124137 1.084785357   0
+  3     1.387207669 1.196666697   0
  */
 int get_control_states(const char* path,
                        poet_control_state_t** cstates,
@@ -437,9 +437,9 @@ int get_control_states(const char* path,
 
 /* Example file:
   #id   core_mask   freqs
-  0	    0x00000001	250000
-  1	    0x00000003	250000,400000
-  2	    0x0000000F	250000,250000,450000,450000
+  0     0x00000001  250000
+  1     0x00000003  250000,400000
+  2     0x0000000F  250000,250000,450000,450000
  */
 int get_cpu_states(const char* path,
                    poet_cpu_state_t** cstates,
