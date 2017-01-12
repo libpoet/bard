@@ -85,15 +85,22 @@ typedef struct {
  * Default values for state variables are located in src/poet_constants.h
  *
  * @param goal
+ *   Must be > 0
  * @param constraint
  * @param num_system_states
+ *   Must be > 0
  * @param control_states
+ *   Must not be NULL
  * @param apply_states
  * @param apply
  * @param current
  * @param period
+ *   Must be > 0
  * @param buffer_depth
+ *   Must be > 0 if log_filename is specified
  * @param log_filename
+ *
+ * @return poet_state pointer, or NULL on failure (errno will be set)
  */
 poet_state * poet_init(real_t goal,
                        poet_tradeoff_type_t constraint,
@@ -114,7 +121,7 @@ poet_state * poet_init(real_t goal,
 void poet_destroy(poet_state * state);
 
 /**
- * Change the constraint type at runtime.
+ * Change the constraint at runtime.
  *
  * @param state
  * @param constraint
@@ -130,8 +137,11 @@ void poet_set_constraint_type(poet_state * state,
  *
  * @param state
  * @param id
+ *   user-specified identifier for current iteration
  * @param perf
+ *   the actual achieved performance
  * @param pwr
+ *   the actual achieved power
  */
 void poet_apply_control(poet_state * state,
                         unsigned long id,
