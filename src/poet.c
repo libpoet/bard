@@ -643,7 +643,6 @@ void poet_apply_control(poet_state * state,
                         unsigned long id,
                         real_t perf,
                         real_t pwr) {
-  (void) pwr;
   if (state == NULL || getenv(POET_DISABLE_CONTROL) != NULL) {
     return;
   }
