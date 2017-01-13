@@ -272,7 +272,7 @@ void poet_set_constraint_type(poet_state * state,
   }
 }
 
-static inline void logger(poet_state * state, unsigned long id,
+static inline void logger(const poet_state * state, unsigned long id,
                           real_t act_rate, real_t act_power,
                           real_t time_workload, real_t energy_workload) {
   unsigned int index;
@@ -351,7 +351,7 @@ static inline void logger(poet_state * state, unsigned long id,
 /*
  * Estimates the base workload of the application by estimating
  * either the amount of time (in seconds) or the amount of energy
- * (in joules)  which elapses between heartbeats without any knobs
+ * (in joules)  which elapses between iterations without any knobs
  * activated by poet.
  *
  * Uses a Kalman Filter
@@ -483,13 +483,13 @@ static inline void calculate_time_division(poet_state * state,
                             mult(r_period, upper_xup - target_xup) + target_xup);
 
     if (hybrid_xup >= partner_xup) {
-      // one heartbeat is already too long to be here, even without idling
+      // one iteration is already too long to be here, even without idling
       low_state_iters = 0;
       idle_ns = 0;
       cost = mult(div(r_period, upper_xup), upper_xup_cost);
       cost_xup = upper_xup_cost;
     } else {
-      // compute percentage of first heartbeat to spend idling
+      // compute percentage of first iteration to spend idling
       real_t x;
       real_t hybrid_xup_cost;
       if (lower_xup <= R_ZERO) {
@@ -506,7 +506,7 @@ static inline void calculate_time_division(poet_state * state,
       }
 
       real_t idle_sec = mult(workload,
-                             div(R_ONE, hybrid_xup) - // time in first heartbeat
+                             div(R_ONE, hybrid_xup) - // time in first iteration
                              div(x, partner_xup));    // time in partner id
       idle_ns = real_to_int(mult(idle_sec, CONST(1000000000.0)));
       low_state_iters = 1;
@@ -521,9 +521,9 @@ static inline void calculate_time_division(poet_state * state,
     if (upper_xup == lower_xup) {
       r_low_state_iters = R_ZERO;
     } else {
-      // x represents the percentage of heartbeats spent in the first (lower)
+      // x represents the percentage of iterations spent in the first (lower)
       // configuration
-      // Conversely, (1 - x) is the percentage of heartbeats in the second
+      // Conversely, (1 - x) is the percentage of iterations in the second
       // (upper) configuration
       // This equation ensures the time period of the combined rates is equal
       // to the time period of the target rate
@@ -650,12 +650,12 @@ void poet_apply_control(poet_state * state,
 
   if (state->current_action == 0) {
     // Estimate the performance workload
-    // estimate time between heartbeats given minimum amount of resources
+    // estimate time between iterations given minimum amount of resources
     real_t time_workload = estimate_base_workload(perf,
                                                   state->scs.u,
                                                   &state->pfs);
     // Estimate the cost workload
-    // estimate energy between heartbeats given minimum amount of resources
+    // estimate energy between iterations given minimum amount of resources
     real_t energy_workload = estimate_base_workload(pwr,
                                                     state->pcs.u,
                                                     &state->cfs);
@@ -666,23 +666,11 @@ void poet_apply_control(poet_state * state,
       case POWER:
         calculate_xup(pwr, state->constraint_goal, energy_workload, &state->pcs);
         workload = energy_workload;
-        /*printf("\ntarget power is %f\n"
-               "current power is %f\n"
-               "calculated powerup is %f\n\n",
-               real_to_db(goal),
-               real_to_db(pwr),
-               real_to_db(state->pcs->u));*/
         break;
       case PERFORMANCE:
       default:
         calculate_xup(perf, state->constraint_goal, time_workload, &state->scs);
         workload = time_workload;
-        /*printf("\ntarget rate is %f\n"
-               "current rate is %f\n"
-               "calculated speedup is %f\n\n",
-               real_to_db(goal),
-               real_to_db(act_speed),
-               real_to_db(state->scs->u));*/
     }
 
     // Xup is translated into a system configuration
@@ -690,9 +678,6 @@ void poet_apply_control(poet_state * state,
     // in order to achieve the requested Xup
     translate_n2_with_time(state, workload);
     calculate_cost_xup(state);
-
-    /*printf("POET: low_state_iters = %d; idle time (ns) = %llu\n",
-           state->low_state_iters, state->idle_ns);*/
 
     logger(state, id,
            perf, pwr,
