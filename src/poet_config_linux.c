@@ -25,7 +25,7 @@
 
 #ifndef POET_CONFIG_IDLE_PATH
   // binary that enforces idling our process
-  #define POET_CONFIG_IDLE_PATH "/usr/local/bin/poet_idle"
+  #define POET_CONFIG_IDLE_PATH "/usr/local/bin/bard_idle"
 #endif
 
 /**
