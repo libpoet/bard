@@ -1,6 +1,7 @@
-#include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 #include <heartbeat-pow.h>
@@ -8,6 +9,8 @@
 #include "poet.h"
 #include "poet_config.h"
 #include "poet_math.h"
+
+// Modify the following define statements as appropriate for your test platform
 
 #define CONTROL_STATES { \
 { 0 , CONST(1.0) , CONST(1.0) , 0 } , \
@@ -21,23 +24,13 @@
 { 2 , "0x00000001" , "1200000" } , \
 { 3 , "0x00000001" , "1300000" }}
 
-const char* POET_LOG_FILE = "/tmp/poet_log.txt";
-
-int BIG_NUM1;
-int BIG_NUM2_START = 10000000;
-int BIG_NUM2 = 10000000;
+const char* POET_LOG_FILE = "poet.log";
+const unsigned int WORK_ITERATIONS = 10000000;
 
 poet_control_state_t control_states[] = CONTROL_STATES;
 poet_cpu_state_t cpu_states[] = CPU_STATES;
 
-void apply(void * states, unsigned int num_states, unsigned int id,
-           unsigned int last_id, unsigned long long idle_ns,
-           unsigned int is_first_apply);
-void apply2(void * states, unsigned int num_states, unsigned int id,
-            unsigned int last_id, unsigned long long idle_ns,
-            unsigned int is_first_apply);
-
-void apply(void * states,
+void apply(void* states,
            unsigned int num_states,
            unsigned int id,
            unsigned int last_id,
@@ -48,34 +41,25 @@ void apply(void * states,
   (void) last_id;
   (void) idle_ns;
   (void) is_first_apply;
-  BIG_NUM2  = BIG_NUM2_START / real_to_db(control_states[id].speedup);
-}
-
-double freqs[4] = {2.00, 2.33, 2.67, 3.17};
-unsigned int freq_state = 0;
-
-void apply2(void * states,
-            unsigned int num_states,
-            unsigned int id,
-            unsigned int last_id,
-            unsigned long long idle_ns,
-            unsigned int is_first_apply) {
-  (void) states;
-  (void) num_states;
-  (void) last_id;
-  (void) idle_ns;
-  (void) is_first_apply;
+  int retvalsyscall = 0;
   char command[4096];
-  int i;
-  if (freq_state != id) {
-    for(i = 0; i < 8; i++) {
+  unsigned int i;
+  char* freqs = strdup(cpu_states[id].freqs);
+  char* freq = strtok(freqs, ",");
+  while (freq != NULL) {
+    if (freq[0] != '-') {
       snprintf(command, sizeof(command),
-               "echo %d > /sys/devices/system/cpu/cpu%d/cpufreq/scaling_setspeed",
-               (int) (freqs[id] * 1000000), i);
-      system(command);
+              "echo %lu > /sys/devices/system/cpu/cpu%u/cpufreq/scaling_setspeed",
+              strtoul(freq, NULL, 0), i);
+      retvalsyscall = system(command);
+      if (retvalsyscall != 0) {
+        fprintf(stderr, "apply: ERROR setting frequencies: %d\n", retvalsyscall);
+      }
     }
-    freq_state = id;
+    freq = strtok(NULL, ",");
+    i++;
   }
+  free(freqs);
 }
 
 static inline uint64_t get_time(void) {
@@ -113,7 +97,7 @@ int main(int argc, char** argv) {
     perror("malloc");
     return 1;
   }
-  int hb_fd = 1;
+  int hb_fd = fileno(stdout);
   if (heartbeat_pow_init(&hb, window_size, hb_window_buffer, hb_fd, NULL)) {
     perror("Failed to initialize heartbeat");
     return 1;
@@ -126,7 +110,7 @@ int main(int argc, char** argv) {
   }
 
   volatile int dummy = 0;
-  BIG_NUM1 = atoi(argv[1]);
+  unsigned int num_beats = atoi(argv[1]);
   poet_state * state = poet_init(CONST(atof(argv[2])),
                                  PERFORMANCE,
                                  4,
@@ -142,14 +126,14 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  int i, j;
+  unsigned int i, j;
   uint64_t time_start, time_end, energy_start, energy_end;
   time_end = get_time();
   energy_end = em.fread(&em);
-  for (i = 0; i < BIG_NUM1; i++) {
+  for (i = 0; i < num_beats; i++) {
     time_start = time_end;
     energy_start = energy_end;
-    for (j = 0; j < BIG_NUM2; j++) {
+    for (j = 0; j < WORK_ITERATIONS; j++) {
       dummy = dummy >> 1;
       dummy = dummy - 1;
     }
