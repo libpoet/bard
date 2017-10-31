@@ -43,7 +43,7 @@ static void apply(void* states,
   (void) is_first_apply;
   int retvalsyscall = 0;
   char command[4096];
-  unsigned int i;
+  unsigned int i = 0;
   char* freqs = strdup(cpu_states[id].freqs);
   char* freq = strtok(freqs, ",");
   while (freq != NULL) {

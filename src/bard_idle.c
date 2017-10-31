@@ -23,7 +23,7 @@ static inline void usage(char* cmd) {
 
 int main(int argc, char** argv) {
   struct timespec ts_sleep;
-  pid_t pids[argc - ARG_OFFSET];
+  pid_t* pids;
   int i;
   long long nanosec;
 
@@ -38,6 +38,10 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  pids = calloc(argc - ARG_OFFSET, sizeof(pid_t));
+  if (pids == NULL) {
+    return 1;
+  }
   // send SIGSTOP to processes
   for (i = 0; i < argc - ARG_OFFSET; i++) {
     pids[i] = (pid_t) atol(argv[i + ARG_OFFSET]);
@@ -65,5 +69,6 @@ int main(int argc, char** argv) {
     kill(pids[i], SIGCONT);
   }
 
+  free(pids);
   return 0;
 }
