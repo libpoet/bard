@@ -301,7 +301,7 @@ static inline void logger(const poet_state * state, unsigned long id,
 
     if (index == state->buffer_depth - 1) {
       for (i = 0; i < state->buffer_depth; i++) {
-        char* constraint;
+        const char* constraint;
         switch (state->constraint) {
           case POWER:
             constraint = "POWER";
@@ -518,7 +518,7 @@ static inline void calculate_time_division(poet_state * state,
     // Calculate the time division between the upper and lower state
     // If lower rate and upper rate are equal, no need for time division
     real_t r_low_state_iters;
-    if (upper_xup == lower_xup) {
+    if (upper_xup <= lower_xup && upper_xup >= lower_xup) {
       r_low_state_iters = R_ZERO;
     } else {
       // x represents the percentage of iterations spent in the first (lower)

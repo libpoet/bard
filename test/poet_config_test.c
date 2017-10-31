@@ -11,19 +11,21 @@ unsigned int nctl_states;
 poet_cpu_state_t * cpu_states;
 unsigned int ncpu_states;
 
-void* thread_worker() {
+static void* thread_worker(void* arg) {
+  (void) arg;
   int i = 0;
   while(1) {
     i++;
   }
+  return NULL;
 }
 
-void test_idle() {
+#define NTHREADS 32
+static void test_idle(void) {
   // test idle states
-  unsigned int nthreads = 32;
-  pthread_t threads[nthreads];
+  pthread_t threads[NTHREADS];
   unsigned int i;
-  for (i = 0; i < nthreads; i++) {
+  for (i = 0; i < NTHREADS; i++) {
     if (pthread_create(&threads[i], NULL, thread_worker, NULL)) {
       fprintf(stderr, "Thread creation failed\n");
       exit(1);
@@ -32,7 +34,7 @@ void test_idle() {
   sleep(5);
   apply_cpu_config(cpu_states, ncpu_states, 0, 1, 15123000000, 1);
   sleep(5);
-  for (i = 0; i < nthreads; i++) {
+  for (i = 0; i < NTHREADS; i++) {
     if (pthread_cancel(threads[i])) {
       fprintf(stderr, "Thread cancel failed\n");
       exit(1);
@@ -40,7 +42,7 @@ void test_idle() {
   }
 }
 
-int main() {
+int main(void) {
   unsigned int curr_state_id;
   unsigned int i;
 

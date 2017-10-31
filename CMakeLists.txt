@@ -1,11 +1,24 @@
 cmake_minimum_required(VERSION 2.8.11)
 
 project(bard)
-set(PROJECT_VERSION 2.0.0)
+project(poet)
+set(VERSION_MAJOR 2)
+set(VERSION_MINOR 0)
+set(VERSION_PATCH 0)
+set(PROJECT_VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wno-unknown-pragmas -Wextra -pedantic -pedantic-errors -std=gnu99")
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -std=gnu99")
 
 include_directories(${PROJECT_SOURCE_DIR}/inc)
+
+if(CMAKE_HOST_UNIX)
+  include(GNUInstallDirs)
+else()
+  set(CMAKE_INSTALL_BINDIR bin)
+  set(CMAKE_INSTALL_LIBDIR lib)
+  set(CMAKE_INSTALL_INCLUDEDIR include)
+endif()
 
 
 # Test Dependencies
@@ -39,6 +52,10 @@ if(${FIXED_POINT})
 endif()
 
 add_library(bard src/poet.c src/poet_config_linux.c)
+if(BUILD_SHARED_LIBS)
+  set_target_properties(bard PROPERTIES VERSION ${PROJECT_VERSION}
+                                        SOVERSION ${VERSION_MAJOR})
+endif()
 
 
 # Binaries
@@ -67,8 +84,8 @@ endif()
 # pkg-config
 
 set(PKG_CONFIG_EXEC_PREFIX "\${prefix}")
-set(PKG_CONFIG_LIBDIR "\${prefix}/lib")
-set(PKG_CONFIG_INCLUDEDIR "\${prefix}/include/${PROJECT_NAME}")
+set(PKG_CONFIG_LIBDIR "\${prefix}/${CMAKE_INSTALL_LIBDIR}")
+set(PKG_CONFIG_INCLUDEDIR "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}")
 set(PKG_CONFIG_CFLAGS "-I\${includedir}")
 
 set(PKG_CONFIG_NAME "${PROJECT_NAME}")
@@ -82,10 +99,10 @@ configure_file(
 
 # Install
 
-install(TARGETS bard DESTINATION lib)
-install(TARGETS bard_idle DESTINATION bin)
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/poet.h ${CMAKE_CURRENT_SOURCE_DIR}/inc/poet_config.h ${CMAKE_CURRENT_SOURCE_DIR}/inc/poet_math.h DESTINATION include/${PROJECT_NAME})
-install(DIRECTORY ${CMAKE_BINARY_DIR}/pkgconfig/ DESTINATION lib/pkgconfig)
+install(TARGETS bard DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(TARGETS bard_idle DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES inc/poet.h inc/poet_config.h inc/poet_math.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME})
+install(DIRECTORY ${CMAKE_BINARY_DIR}/pkgconfig/ DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 
 
 # Uninstall

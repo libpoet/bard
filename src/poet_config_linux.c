@@ -59,7 +59,7 @@ static inline cpu_set_t* alloc_curr_cpu_assignment(unsigned long* num_cpus) {
  * Compare the current CPU governor state with the provided one.
  * Returns -1 on failure.
  */
-static inline int cpu_governor_cmp(unsigned int cpu, char* governor) {
+static inline int cpu_governor_cmp(unsigned int cpu, const char* governor) {
   FILE* fp;
   char buffer[128];
   int governor_cmp = -1;
@@ -188,9 +188,9 @@ static inline int dvfs_freqs_equal(unsigned long* curr_freq_assignment,
 }
 
 // try to get current CPU configuration state
-int get_cpu_state(const poet_cpu_state_t* states,
-                  unsigned int num_states,
-                  unsigned int* curr_state_id) {
+static int get_cpu_state(const poet_cpu_state_t* states,
+                         unsigned int num_states,
+                         unsigned int* curr_state_id) {
   int ret = -1;
   unsigned long ncpus = 0;
   unsigned long i;
@@ -251,7 +251,7 @@ int get_cpu_state(const poet_cpu_state_t* states,
 int get_current_cpu_state(const void* states,
                           unsigned int num_states,
                           unsigned int* curr_state_id) {
-  return get_cpu_state((poet_cpu_state_t*) states, num_states, curr_state_id);
+  return get_cpu_state((const poet_cpu_state_t*) states, num_states, curr_state_id);
 }
 
 static inline void apply_cpu_idle_state(unsigned long long nanosec) {
@@ -264,11 +264,11 @@ static inline void apply_cpu_idle_state(unsigned long long nanosec) {
 }
 
 // Set CPU frequency and number of cores using taskset system call
-void apply_cpu_config_taskset(poet_cpu_state_t* cpu_states,
-                              unsigned int num_states,
-                              unsigned int id,
-                              unsigned int last_id,
-                              unsigned int is_first_apply) {
+static void apply_cpu_config_taskset(poet_cpu_state_t* cpu_states,
+                                     unsigned int num_states,
+                                     unsigned int id,
+                                     unsigned int last_id,
+                                     unsigned int is_first_apply) {
   int retvalsyscall = 0;
   char command[4096];
 
