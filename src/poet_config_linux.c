@@ -25,7 +25,7 @@
 
 #ifndef POET_CONFIG_IDLE_PATH
   // binary that enforces idling our process
-  #define POET_CONFIG_IDLE_PATH "/usr/local/bin/bard_idle"
+  #define POET_CONFIG_IDLE_PATH "bard_idle"
 #endif
 
 /**
@@ -254,9 +254,9 @@ int get_current_cpu_state(const void* states,
   return get_cpu_state((const poet_cpu_state_t*) states, num_states, curr_state_id);
 }
 
-static inline void apply_cpu_idle_state(unsigned long long nanosec) {
+static void apply_cpu_idle_state(unsigned long long nanosec) {
   char command[4096];
-  sprintf(command, POET_CONFIG_IDLE_PATH" %llu %ld", nanosec, (long) getpid());
+  snprintf(command, sizeof(command), POET_CONFIG_IDLE_PATH" %llu %ld", nanosec, (long) getpid());
   printf("apply_cpu_idle_state: %s\n", command);
   if (system(command)) {
     fprintf(stderr, "apply_cpu_idle_state: ERROR idling process\n");
