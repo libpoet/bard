@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 
+## [bard/v2.0.1] - 2018-05-12
+### Fixed
+ * Header files were being installed to poet directory instead of bard directory
+
+
 ## [bard/v2.0.0] - 2017-11-01
 ### Added
  * SAMOS 2016 publication details
@@ -23,6 +28,7 @@
 ### Added
  * Initial public release (forked Bard from POET git revision 3b32625)
 
-[Unreleased]: https://github.com/libpoet/bard/compare/bard/v2.0.0...HEAD
+[Unreleased]: https://github.com/libpoet/bard/compare/bard/v2.0.1...HEAD
+[bard/v2.0.1]: https://github.com/libpoet/bard/compare/bard/v2.0.0...bard/v2.0.1
 [bard/v2.0.0]: https://github.com/libpoet/bard/compare/bard/v1.0.0...bard/v2.0.0
 [bard/v1.0.0]: https://github.com/libpoet/bard/compare/3b32625...bard/v1.0.0
